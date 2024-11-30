@@ -9,7 +9,11 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Audiowide&family=Jaro:opsz@6..72&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.1/css/all.min.css" integrity="sha512-5Hs3dF2AEPkpNAR7UiOHba+lRSJNeM2ECkwxUIxC1Q/FLycGTbNapWXB4tP889k5T5Ju8fs4b1P5z/iB4nMfSQ==" crossorigin="anonymous" referrerpolicy="no-referrer" />
-<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC2FasXIMLUeQ9VpKDbbpaei9SEhozy0R0&libraries=places"></script>
+<!-- <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC2FasXIMLUeQ9VpKDbbpaei9SEhozy0R0&libraries=places"></script> -->
+
+<!-- <script src="https://maps.googleapis.com/maps/api/js?key={{ google_api_key }}&libraries=places&callback=initAutocomplete" async defer></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script> -->
+    
     <title>Document</title>
 </head>
 <style>
@@ -50,6 +54,33 @@
     color: white; /* Optional: Change text color */
 }
 
+#pickupsuggestions, #dropsuggestions {
+      /* border: 1px solid #ccc; */
+      max-width: 200px;
+      overflow-y: auto;
+      background-color: white;
+      position: absolute;
+      width: 100%;  /* Match the width of the input box */
+      z-index: 10;
+    }
+
+    /* Style for each suggestion item */
+    #pickupsuggestions div, #dropsuggestions div {
+      padding: 8px;
+      cursor: pointer;
+    }
+
+    /* Hover effect on suggestion items */
+    #pickupsuggestions div:hover, #dropsuggestions div:hover {
+      background-color: #f0f0f0;
+    }
+
+    /* Prevents input box overlap with suggestion box */
+    .input-container {
+      position: relative;
+      /* width: 300px;  */
+      /* margin-bottom: 20px; */
+    }
 </style>
 <body>
     <nav class="navbar navbar-expand-lg">
@@ -126,10 +157,29 @@
       </div> <br>
       <form action="{% url 'calculate_distance' %}" method="POST">
             {% csrf_token %}
-            <div class="text-center ">
-              <i class="fa-solid fa-location-dot fa-xl" style="color: #21ea06;"></i> <input type="text"  class="rounded " name="pickup" placeholder="Pickup Location" required>
-              <i class="fa-solid fa-location-dot fa-xl" style="color: #c90505;"></i> <input type="text" class="rounded" name="drop" placeholder="Drop Location" (input)="dropLocation($event)" required><br>
-            </div><br>
+            
+            <div class="text-center" style="display: block;place-items: center;">
+
+              <div class="d-flex">
+                <div class="d-flex align-items-center">
+                  <i class="fa-solid fa-location-dot fa-xl" style="color: #21ea06;"></i>
+                  <div class="input-container">
+                    <input type="text" id="pickup" class="rounded" name="pickup" placeholder="Pickup Location" required oninput="showSuggestions(this)">
+                    <div id="pickupsuggestions"></div>
+                  </div>
+                </div>
+  
+                <div class="d-flex align-items-center">
+                  <i class="fa-solid fa-location-dot fa-xl" style="color: #c90505;"></i>
+                  <div class="input-container">
+                    <input type="text" id="drop" class="rounded" name="drop" placeholder="Drop Location" required oninput="showSuggestions(this)">
+                    <div id="dropsuggestions"></div>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+            <br>
             <div class="text-center ">
               <i class="fa-solid fa-user fa-xl" style="color: #0910ec;"></i> <input type="text" class="rounded" name="name" placeholder="Enter Name" required>
               <i class="fa-solid fa-phone fa-xl" style="color: #56df0c;"></i> <input type="text" class="rounded" name="phone" placeholder="Mobile Number" required><br>
@@ -139,11 +189,10 @@
               <i class="fa-regular fa-calendar-days fa-xl" style="color: #c706ad;"></i> <input type="date" class="rounded px-4" name="date" placeholder="Pickup Date" required>
             </div><br>
             <div class="result text-center">
-              {% if distance %}
-                  <p>The distance between the locations is: <strong>{{ distance|floatformat:2 }} km</strong></p>
-              {% elif error_message %}
-                  <p style="color: red; background-color: whitesmoke;">{{ error_message }}</p>
-              {% endif %}
+              <br>
+              <button onclick="getDistance()">Calculate Distance</button>
+              <p>The distance between the locations is: <strong></strong><div id="distance"></div></strong></p>
+
           </div><br>
           <div class="row text-center p-2">
             <div class="col-md-4 car">
@@ -177,50 +226,116 @@
       <p class="text-center" style="width: 100%; height: 80px;">2024 &copy; Koval-Taxi. All Rights Reserved.</p>
   </footer>
     
+
+  <script>
+    // Function to handle input and show location suggestions
+    function showSuggestions(inputField) {
+      
+      const query = inputField.value;
+
+      if (query.length < 3) {
+        document.getElementById('pickupsuggestions').innerHTML = '';  // Clear suggestions if the query is too short
+        document.getElementById('dropsuggestions').innerHTML = '';  // Clear suggestions if the query is too short
+        return;
+      }
+
+      getLocationSuggestions(query, (data) => {
+        const suggestionsContainer = document.getElementById(inputField.id+'suggestions');
+        suggestionsContainer.innerHTML = '';  // Clear previous suggestions
+        
+        if(data.length) {
+          data.forEach(item => {
+            const suggestion = document.createElement('div');
+            suggestion.textContent = item.display_name;
+            suggestion.onclick = () => selectSuggestion(item, inputField);
+            suggestionsContainer.appendChild(suggestion);
+          });
+        }
+      });
+    }
+
+    // Function to get location suggestions from Nominatim API
+    function getLocationSuggestions(query, callback) {
+      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&addressdetails=1&limit=5`;
+      // const url = `https://us1.locationiq.com/v1/search.php?key=YOUR_API_KEY&q=${encodeURIComponent(query)}&format=json&limit=5`;
+      fetch(url)
+        .then(response => response.json())
+        .then(data => {
+          callback(data);
+        })
+        .catch(error => console.error('Error:', error));
+    }
+
+    // Function to populate the input field with the selected suggestion
+    function selectSuggestion(item, inputField) {
+      inputField.value = item.display_name;  // Set the selected address in the input field
+      document.getElementById('pickupsuggestions').innerHTML = '';  // Clear suggestions
+      document.getElementById('dropsuggestions').innerHTML = '';  // Clear suggestions
+    }
+
+    // Function to calculate the distance using Haversine formula
+    function getDistance() {
+      const pickupLocation = document.getElementById('pickup').value;
+      const dropLocation = document.getElementById('drop').value;
+
+      // Get pickup and drop location coordinates using Nominatim API
+      Promise.all([
+        getLocationCoordinates(pickupLocation),
+        getLocationCoordinates(dropLocation)
+      ])
+      .then(results => {
+        const pickupCoords = results[0];
+        const dropCoords = results[1];
+
+        if (pickupCoords && dropCoords) {
+          // Calculate the distance between the two coordinates using Haversine formula
+          const distance = haversine(pickupCoords.lat, pickupCoords.lon, dropCoords.lat, dropCoords.lon);
+          document.getElementById('distance').innerText = `Distance: ${distance.toFixed(2)} km`;
+        } else {
+          document.getElementById('distance').innerText = 'Invalid locations entered.';
+        }
+      })
+      .catch(error => {
+        console.error('Error calculating distance:', error);
+        document.getElementById('distance').innerText = 'Error calculating distance.';
+      });
+    }
+
+    // Function to get the coordinates (latitude and longitude) of a location using Nominatim
+    function getLocationCoordinates(location) {
+      return new Promise((resolve, reject) => {
+        getLocationSuggestions(location, (data) => {
+          if (data && data.length > 0) {
+            const { lat, lon } = data[0];
+            resolve({ lat: parseFloat(lat), lon: parseFloat(lon) });
+          } else {
+            resolve(null);  // If no data found, return null
+          }
+        });
+      });
+    }
+
+    // Haversine formula to calculate the distance between two lat/lon points in km
+    function haversine(lat1, lon1, lat2, lon2) {
+      const R = 6371; // Radius of the Earth in km
+      const φ1 = Math.radians(lat1);
+      const φ2 = Math.radians(lat2);
+      const Δφ = Math.radians(lat2 - lat1);
+      const Δλ = Math.radians(lon2 - lon1);
+
+      const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+                Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      
+      return R * c; // Distance in km
+    }
+
+    // Convert degrees to radians
+    Math.radians = function(degrees) {
+      return degrees * Math.PI / 180;
+    }
+  </script>
+
+
 </body>
 </html>
- <!--
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC2FasXIMLUeQ9VpKDbbpaei9SEhozy0R0&libraries=places"></script>
-  <title>Document</title>
-</head>
-<body>
-  <form id="distance-form" method="POST" action="{%  url 'calculate_distance'%}" onclick="initializeAutocomplete(event)">
-     {% csrf_token %}
-     <label for="location1">Location 1:</label>
-     <input type="text" id="location1" name="location1" placeholder="Enter a place" required><br><br>
-     <label for="location2">Location 2:</label>
-     <input type="text" id="location2" name="location2" placeholder="Enter a place" required><br><br>
-     <input type="hidden" id="lat1" name="lat1">
-     <input type="hidden" id="lon1" name="lon1">
-     <input type="hidden" id="lat2" name="lat2">
-     <input type="hidden" id="lon2" name="lon2">
-     <button type="submit">Calculate Distance</button>
-    </form> {% if distance %} <h2>Distance: {{ distance }} km</h2> {% endif %}
-</body>
-</html>
-<script>
-function initializeAutocomplete() { 
-  const location1 = new google.maps.places.Autocomplete(document.getElementById("location1")); 
-  const location2 = new google.maps.places.Autocomplete(document.getElementById("location2"));
-
- // Set listeners for place changes to get latitude and longitude 
- location1.addListener("place_changed", function () { 
-  const place = location1.getPlace();
-  document.getElementById("lat1").value = place.geometry.location.lat(); 
-  document.getElementById("lon1").value = place.geometry.location.lng(); }); 
-  location2.addListener("place_changed", function () { 
-    const place = location2.getPlace(); 
-    document.getElementById("lat2").value = place.geometry.location.lat(); 
-    document.getElementById("lon2").value = place.geometry.location.lng(); }); } 
-    google.maps.event.addDomListener(window, "load", initializeAutocomplete); 
-</script>
-
-
-
-
- -->

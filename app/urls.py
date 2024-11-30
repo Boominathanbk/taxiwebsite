@@ -4,5 +4,6 @@ from . import views
 urlpatterns = [
     path('',views.homepage,name='homepage'),
     path('round',views.round, name='round'),
-    path('calculate_distance',views.calculate_distance, name='calculate_distance'),
+    path('location-suggestions/', views.get_location_suggestions, name='location_suggestions'),
+    path('calculate-distance/', views.calculate_distance, name='calculate_distance'),
 ]

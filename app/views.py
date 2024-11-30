@@ -1,85 +1,85 @@
+import math
 from django.shortcuts import render
-import googlemaps
+# import googlemaps # type: ignore
 from django.shortcuts import render
 from django.conf import settings
-import requests
-from geopy.distance import geodesic
+# import requests # type: ignore
+# from geopy.distance import geodesic # type: ignore
 from .models import Booking
 
+import requests
+from django.http import JsonResponse
 
 def homepage(request):
     return render(request,'home.html')
  
-
-# def calculate_distance(request):
-#     if request.method == "POST":
-#         lat1 = request.POST.get("lat1")        
-#         lon1 = request.POST.get("lon1")         
-#         lat2 = request.POST.get("lat2")       
-#         lon2 = request.POST.get("lon2")
-#         distance = geodesic((lat1, lon1), (lat2, lon2)).kilometers
-#         return render(request,'home.html')
-
-def calculate_distance(request):
-    distance = None
-    error_message = None
-
-    if request.method == "POST":
-        pickup = request.POST.get('pickup')
-        drop = request.POST.get('drop')
-        name = request.POST.get('name')
-        phone = request.POST.get('phone')
-        email = request.POST.get('email')
-        date = request.POST.get('date')
-
-        if not all([pickup, drop, name, phone, email, date]):
-            error_message = "All fields are required."
-            return render(request, 'home.html', {'distance': distance, 'error_message': error_message})
-
-        api_key = settings.GOOGLE_API_KEY
-
-        def get_coordinates(location):
-            url = f"https://maps.googleapis.com/maps/api/geocode/json?address={location}&key={api_key}"
-            try:
-                response = requests.get(url)
-                response.raise_for_status()
-                data = response.json()
-                if data.get('status') == 'OK':
-                    return data['results'][0]['geometry']['location'], None
-                return None, data.get('error_message', 'Invalid location')
-            except requests.exceptions.RequestException as e:
-                return None, f"Error connecting to API: {e}"
-
-        pickup_coords, pickup_error = get_coordinates(pickup)
-        drop_coords, drop_error = get_coordinates(drop)
-
-        if not pickup_coords:
-            error_message = f"Pickup location error: {pickup_error}"
-        elif not drop_coords:
-            error_message = f"Drop location error: {drop_error}"
-        else:
-            try:
-                distance = geodesic(
-                    (pickup_coords['lat'], pickup_coords['lng']),
-                    (drop_coords['lat'], drop_coords['lng'])
-                ).kilometers
-
-                Booking.objects.create(
-                    pickup=pickup,
-                    drop=drop,
-                    name=name,
-                    phone=phone,
-                    email=email,
-                    date=date,
-                    distance=round(distance, 2)
-                )
-                print("datas save")
-            except Exception as e:
-                error_message = f"Error calculating or saving data: {e}"
-
-    return render(request, 'home.html', {'distance': distance, 'error_message': error_message})
-
-
-
 def round(request):
     return render(request,'round.html')
+
+
+# Haversine formula for calculating distance between two lat/long points
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371  # Radius of the Earth in km
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+
+    a = math.sin(delta_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    
+    return R * c  # Distance in km
+
+def calculate_distance(request):
+    pickup = request.GET.get('pickup')  # Pickup location
+    drop = request.GET.get('drop')  # Drop location
+
+    if pickup and drop:
+        # Geocode pickup location
+        pickup_url = f'https://nominatim.openstreetmap.org/search?format=json&q={pickup}&addressdetails=1&limit=1'
+        drop_url = f'https://nominatim.openstreetmap.org/search?format=json&q={drop}&addressdetails=1&limit=1'
+
+        pickup_response = requests.get(pickup_url)
+        drop_response = requests.get(drop_url)
+
+        if pickup_response.status_code == 200 and drop_response.status_code == 200:
+            pickup_data = pickup_response.json()
+            drop_data = drop_response.json()
+
+            if pickup_data and drop_data:
+                # Extract lat/lon from response
+                pickup_lat = float(pickup_data[0].get('lat'))
+                pickup_lon = float(pickup_data[0].get('lon'))
+                drop_lat = float(drop_data[0].get('lat'))
+                drop_lon = float(drop_data[0].get('lon'))
+
+                # Calculate distance using Haversine formula
+                distance = haversine(pickup_lat, pickup_lon, drop_lat, drop_lon)
+                return JsonResponse({'distance': round(distance, 2)})
+    
+    return JsonResponse({'error': 'Unable to calculate distance'})
+
+def get_location_suggestions(request):
+    query = request.GET.get('q', '')  # Get query from the request
+    if query:
+        # Nominatim API endpoint
+        url = f'https://nominatim.openstreetmap.org/search?format=json&q={query}&addressdetails=1&limit=5'
+        
+        # Make request to Nominatim API
+        response = requests.get(url)
+        
+        # Check if the response is successful
+        if response.status_code == 200:
+            results = response.json()
+            # Process results (you can change the fields based on your needs)
+            suggestions = []
+            for result in results:
+                suggestion = {
+                    'name': result.get('display_name'),
+                    'lat': result.get('lat'),
+                    'lon': result.get('lon')
+                }
+                suggestions.append(suggestion)
+            return JsonResponse({'suggestions': suggestions})
+    
+    return JsonResponse({'suggestions': []})
